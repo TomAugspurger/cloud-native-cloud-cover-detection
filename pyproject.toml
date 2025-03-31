@@ -1,0 +1,31 @@
+[project]
+name = "cloud-cover-detection"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Tom Augspurger", email = "toaugspurger@nvidia.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "boto3>=1.37.23",
+    "ipython>=9.0.2",
+    "jupyter>=1.1.1",
+    "jupyterlab>=4.3.6",
+    "matplotlib>=3.10.1",
+    "obstore>=0.6.0",
+    "pandas>=2.2.3",
+    "pillow>=11.1.0",
+    "pytorch-lightning>=2.5.1",
+    "rasterio>=1.4.3",
+    "torch>=2.6.0",
+    "zarr>=3.0.6",
+]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "ipython>=9.0.2",
+]
