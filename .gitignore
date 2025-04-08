@@ -11,3 +11,6 @@ wheels/
 
 .ipynb_checkpoints
 .vscode
+lightning_logs
+MNIST
+*.nsys-rep

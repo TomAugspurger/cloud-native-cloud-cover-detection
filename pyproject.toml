@@ -6,19 +6,36 @@ readme = "README.md"
 authors = [
     { name = "Tom Augspurger", email = "toaugspurger@nvidia.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "boto3>=1.37.23",
+    "cuproj-cu12>=25.2.0",
+    "cupy-cuda12x>=13.4.1",
+    "cupy-xarray",
+    "cuspatial-cu12>=25.2.0",
+    "dask[complete]>=2025.3.0",
+    "httpx>=0.28.1",
     "ipython>=9.0.2",
     "jupyter>=1.1.1",
     "jupyterlab>=4.3.6",
     "matplotlib>=3.10.1",
+    "nvtx>=0.2.11",
     "obstore>=0.6.0",
     "pandas>=2.2.3",
     "pillow>=11.1.0",
+    "planetary-computer>=1.0.0",
+    "pyarrow>=19.0.1",
+    "pydantic-settings>=2.8.1",
+    "pyproj>=3.7.1",
+    "pystac>=1.12.2",
+    "pystac-client>=0.8.6",
     "pytorch-lightning>=2.5.1",
     "rasterio>=1.4.3",
+    "segmentation-models-pytorch>=0.4.0",
+    "structlog>=25.2.0",
     "torch>=2.6.0",
+    "torchgeo>=0.6.2",
+    "xarray>=2025.3.1",
     "zarr>=3.0.6",
 ]
 [build-system]
@@ -29,3 +46,12 @@ build-backend = "hatchling.build"
 dev = [
     "ipython>=9.0.2",
 ]
+
+
+[[tool.uv.dependency-metadata]]
+name = "cupy-xarray"
+version = "0.1.4"
+requires-dist = ["numpy>=1.8.1", "scipy>=0.13.0", "six>=1.11.0"]
+
+[tool.uv.sources]
+cupy-xarray = { git = "https://github.com/xarray-contrib/cupy-xarray.git" }
