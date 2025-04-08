@@ -1,11 +1,10 @@
 import affine
-import cuproj
 import pyproj
 import pystac
 import planetary_computer
 import rasterio
-import numpy as np
 import rasterio.warp
+import numpy as np
 
 
 # Read https://r.geocompx.org/reproj-geo-data
@@ -160,8 +159,6 @@ def main():
         data = src.read(1)
         transform = src.transform
         crs = src.crs
-
-    import rasterio.warp
 
     # # subset for testing
     # small = data[:100, :100]
