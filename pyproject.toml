@@ -34,6 +34,7 @@ dependencies = [
     "pystac-client>=0.8.6",
     "pytorch-lightning>=2.5.1",
     "rasterio>=1.4.3",
+    "rich>=13.9.4",
     "segmentation-models-pytorch>=0.4.0",
     "structlog>=25.2.0",
     "torch>=2.6.0",
