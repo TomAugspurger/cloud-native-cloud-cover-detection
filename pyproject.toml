@@ -14,11 +14,14 @@ dependencies = [
     "cupy-xarray",
     "cuspatial-cu12>=25.2.0",
     "dask[complete]>=2025.3.0",
+    "gcsfs>=2025.3.2",
     "httpx>=0.28.1",
     "ipython>=9.0.2",
     "jupyter>=1.1.1",
     "jupyterlab>=4.3.6",
     "matplotlib>=3.10.1",
+    "numba-cuda>=0.2.0",
+    "nvmath-python>=0.3.0",
     "nvtx>=0.2.11",
     "obstore>=0.6.0",
     "pandas>=2.2.3",
@@ -55,3 +58,4 @@ requires-dist = ["numpy>=1.8.1", "scipy>=0.13.0", "six>=1.11.0"]
 
 [tool.uv.sources]
 cupy-xarray = { git = "https://github.com/xarray-contrib/cupy-xarray.git" }
+zarr = { git = "https://github.com/zarr-developers/zarr-python" }
