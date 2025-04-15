@@ -6,24 +6,19 @@ Based off https://github.com/cubed-dev/cubed/blob/main/examples/pangeo-1-vortici
 
 Collecting data...
 
-
-CPU: 7.3808 seconds
-CPU: 7.2509 seconds
-CPU: 7.1371 seconds
-GPU: 0.0245 seconds
-GPU: 0.0237 seconds
-GPU: 0.0237 seconds
-GPU fused: 0.1316 seconds
-GPU fused: 0.0179 seconds
-GPU fused: 0.0179 seconds
-GPU super_fast: 0.0070 seconds
-GPU super_fast: 0.0047 seconds
-GPU super_fast: 0.0047 seconds
+Copy host2device    : 0.5123 seconds
+CPU                 : 9.4245 seconds
+GPU                 : 0.0235 seconds
+GPU plain           : 0.0203 seconds
+GPU fused           : 0.0158 seconds
+GPU super_fast      : 0.0040 seconds
+GPU numba_super_fast: 0.0059 seconds
 
 ~28x speedup *on just the computation.*
 """
 
 import time
+from typing import Callable
 import xarray as xr
 import numpy as np
 import cupy_xarray  # noqa: F401
@@ -38,12 +33,34 @@ numba.config.CUDA_ENABLE_PYNVJITLINK = True
 SIZE = (200, 1, 987, 1920)
 
 
+def benchmark(f: Callable, *args, **kwargs) -> float:
+    """
+    Benchmark the given function.
+
+    Runs the function 3 times and returns the median time.
+    """
+    # warmup
+    f(*args, **kwargs)
+    times = []
+    for _ in range(3):
+        start = time.perf_counter()
+        f(*args, **kwargs)
+        end = time.perf_counter()
+        times.append(end - start)
+    return np.median(times).item()
+
+
 def f(ds: xr.Dataset) -> None:
     quad = ds**2
     quad["UV"] = ds.U * ds.V
-    return quad.mean("time")
+    result = quad.mean("time")
+
+    cupy.cuda.Stream.null.synchronize()
+
+    return result
 
 
+@nvtx.annotate("GPU-plain", color="green")
 def plain(U: cupy.ndarray, V: cupy.ndarray) -> cupy.ndarray:
     # three output arrays
     # U * U, V * V, U * V
@@ -96,6 +113,7 @@ def fused(U: cupy.ndarray, V: cupy.ndarray) -> cupy.ndarray:
     return cupy.array([a, b, c])
 
 
+@nvtx.annotate("GPU-superfast", color="purple")
 def super_fast(U: cupy.ndarray, V: cupy.ndarray) -> cupy.ndarray:
     """
     Maximally optimized version that:
@@ -203,6 +221,73 @@ def super_fast(U: cupy.ndarray, V: cupy.ndarray) -> cupy.ndarray:
     return results
 
 
+@cuda.jit
+def numba_super_fast_kernel(u, v, results, size):
+    # Shared memory for parallel reduction
+    sdata = cuda.shared.array(shape=512, dtype=numba.float32)
+
+    # Initialize accumulators for UU, VV, UV
+    acc_uu = 0.0
+    acc_vv = 0.0
+    acc_uv = 0.0
+
+    # Grid stride loop for processing large arrays
+    for i in range(cuda.grid(1), size, cuda.gridDim.x * cuda.blockDim.x):
+        u_val = u[i]
+        v_val = v[i]
+
+        # Compute products and accumulate in thread's registers
+        acc_uu += u_val * u_val
+        acc_vv += v_val * v_val
+        acc_uv += u_val * v_val
+
+    # First level of reduction in shared memory
+    tid = cuda.threadIdx.x
+    sdata[tid] = acc_uu
+    cuda.syncthreads()
+
+    # Parallel reduction for UU
+    s = cuda.blockDim.x // 2
+    while s > 0:
+        if tid < s:
+            sdata[tid] += sdata[tid + s]
+        cuda.syncthreads()
+        s //= 2
+
+    # Thread 0 writes UU result using atomic add
+    if tid == 0:
+        cuda.atomic.add(results, 0, sdata[0])
+
+    # Repeat for VV
+    sdata[tid] = acc_vv
+    cuda.syncthreads()
+
+    s = cuda.blockDim.x // 2
+    while s > 0:
+        if tid < s:
+            sdata[tid] += sdata[tid + s]
+        cuda.syncthreads()
+        s //= 2
+
+    if tid == 0:
+        cuda.atomic.add(results, 1, sdata[0])
+
+    # Repeat for UV
+    sdata[tid] = acc_uv
+    cuda.syncthreads()
+
+    s = cuda.blockDim.x // 2
+    while s > 0:
+        if tid < s:
+            sdata[tid] += sdata[tid + s]
+        cuda.syncthreads()
+        s //= 2
+
+    if tid == 0:
+        cuda.atomic.add(results, 2, sdata[0])
+
+
+@nvtx.annotate("GPU-numba-superfast", color="blue")
 def numba_super_fast(U: cupy.ndarray, V: cupy.ndarray) -> cupy.ndarray:
     """
     Numba implementation of the super_fast function that:
@@ -210,71 +295,6 @@ def numba_super_fast(U: cupy.ndarray, V: cupy.ndarray) -> cupy.ndarray:
     2. Performs reduction in the same kernel to minimize memory traffic
     3. Uses Numba CUDA for high performance
     """
-
-    @cuda.jit
-    def numba_super_fast_kernel(u, v, results, size):
-        # Shared memory for parallel reduction
-        sdata = cuda.shared.array(shape=512, dtype=numba.float32)
-
-        # Initialize accumulators for UU, VV, UV
-        acc_uu = 0.0
-        acc_vv = 0.0
-        acc_uv = 0.0
-
-        # Grid stride loop for processing large arrays
-        for i in range(cuda.grid(1), size, cuda.gridDim.x * cuda.blockDim.x):
-            u_val = u[i]
-            v_val = v[i]
-
-            # Compute products and accumulate in thread's registers
-            acc_uu += u_val * u_val
-            acc_vv += v_val * v_val
-            acc_uv += u_val * v_val
-
-        # First level of reduction in shared memory
-        tid = cuda.threadIdx.x
-        sdata[tid] = acc_uu
-        cuda.syncthreads()
-
-        # Parallel reduction for UU
-        s = cuda.blockDim.x // 2
-        while s > 0:
-            if tid < s:
-                sdata[tid] += sdata[tid + s]
-            cuda.syncthreads()
-            s //= 2
-
-        # Thread 0 writes UU result using atomic add
-        if tid == 0:
-            cuda.atomic.add(results, 0, sdata[0])
-
-        # Repeat for VV
-        sdata[tid] = acc_vv
-        cuda.syncthreads()
-
-        s = cuda.blockDim.x // 2
-        while s > 0:
-            if tid < s:
-                sdata[tid] += sdata[tid + s]
-            cuda.syncthreads()
-            s //= 2
-
-        if tid == 0:
-            cuda.atomic.add(results, 1, sdata[0])
-
-        # Repeat for UV
-        sdata[tid] = acc_uv
-        cuda.syncthreads()
-
-        s = cuda.blockDim.x // 2
-        while s > 0:
-            if tid < s:
-                sdata[tid] += sdata[tid + s]
-            cuda.syncthreads()
-            s //= 2
-
-        if tid == 0:
-            cuda.atomic.add(results, 2, sdata[0])
 
     # Setup the kernel
     size = U.size
@@ -310,59 +330,25 @@ def main():
     ds = xr.merge([U, V])
     ds_gpu = ds.cupy.as_cupy()
 
+    print(f"Copy host2device    : {benchmark(ds.cupy.as_cupy):0.4f} seconds")
+
     # warmup
     f(ds)
     with cupy.cuda.Stream() as stream:
         f(ds_gpu)
         stream.synchronize()
 
-    for i in range(3):
-        start = time.perf_counter()
-        f(ds)
-        end = time.perf_counter()
-        print(f"CPU: {(end - start):0.4f} seconds")
-
-    for i in range(3):
-        with nvtx.annotate("GPU", color="red"), cupy.cuda.Stream() as stream:
-            start = time.perf_counter()
-            f(ds_gpu)
-            stream.synchronize()
-            end = time.perf_counter()
-            print(f"GPU: {(end - start):0.4f} seconds")
-
     U_ = ds_gpu.U.data
     V_ = ds_gpu.V.data
-    for i in range(3):
-        with nvtx.annotate("GPU-palin", color="green"):
-            start = time.perf_counter()
-            plain(U_, V_)
-            # already synchronized
-            end = time.perf_counter()
-            print(f"GPU fused: {(end - start):0.4f} seconds")
 
-    for i in range(3):
-        with nvtx.annotate("gpu-fast", color="green"):
-            start = time.perf_counter()
-            fused(U_, V_)
-            # already synchronized
-            end = time.perf_counter()
-            print(f"GPU fused: {(end - start):0.4f} seconds")
-
-    for i in range(3):
-        with nvtx.annotate("gpu-superfast", color="purple"):
-            start = time.perf_counter()
-            super_fast(U_, V_)
-            # already synchronized
-            end = time.perf_counter()
-            print(f"GPU super_fast: {(end - start):0.4f} seconds")
-
-    for i in range(3):
-        with nvtx.annotate("gpu-numba-superfast", color="blue"):
-            start = time.perf_counter()
-            numba_super_fast(U_, V_)
-            # already synchronized
-            end = time.perf_counter()
-            print(f"GPU numba_super_fast: {(end - start):0.4f} seconds")
+    print(f"CPU                 : {benchmark(f, ds):0.4f} seconds")
+    print(
+        f"GPU                 : {benchmark(nvtx.annotate('GPU', color='red')(f), ds_gpu):0.4f} seconds"
+    )
+    print(f"GPU plain           : {benchmark(plain, U_, V_):0.4f} seconds")
+    print(f"GPU fused           : {benchmark(fused, U_, V_):0.4f} seconds")
+    print(f"GPU super_fast      : {benchmark(super_fast, U_, V_):0.4f} seconds")
+    print(f"GPU numba_super_fast: {benchmark(numba_super_fast, U_, V_):0.4f} seconds")
 
     # Verify all implementations return the same result
     a0, b0, c0 = plain(U.data, V.data)  # host
